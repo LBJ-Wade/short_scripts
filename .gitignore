@@ -1,0 +1,2 @@
+*.pyc
+lhalo_to_hdf5/*trees*
