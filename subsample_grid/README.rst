@@ -39,6 +39,8 @@ optional arguments:
                         of output grid. Required.
 
 Example:
+
+.. code-block:: python
 >>> python python3 subsample.py -f /lustre/projects/p004_swin/jseiler/kali/densfield_grids/1024/snap_48.dens.dat
     -o /lustre/projects/p134_swin/jseiler/kali/density_fields/1024_subsampled_256/snap048.dens.dat
     -p double --gridsize_in=1024 --gridsize_out=256 
