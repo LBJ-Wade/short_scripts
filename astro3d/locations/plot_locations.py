@@ -5,6 +5,13 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 import argparse
 
+# Import Bokeh plotting.
+from bokeh.io import output_file, show
+from bokeh.models import ColumnDataSource, GMapOptions
+from bokeh.plotting import gmap
+from bokeh.plotting import figure, output_file, show, ColumnDataSource
+from bokeh.models import HoverTool
+
 
 def parse_inputs():
     """
@@ -120,7 +127,63 @@ def set_globalplot_properties():
     plt.rc('font', weight='bold')
     plt.rc('legend', numpoints=1, fontsize='x-large')
     plt.rc('text', usetex=True)
-    colors = ['r', 'b', 'g', 'c']
+    #colors = ['r', 'b', 'g', 'c']
+    colors = ['#7b3294','#a4225f', '#a6dba0', '#d7191c','#d01c8b','#a6611a']
+
+
+def get_Gmap_options():
+    """
+    Generates the map options for the Google Map-Bokeh implentation. 
+
+    Parameters
+    ----------
+
+    None. 
+
+    Returns
+    ----------
+
+    map_options: Bokeh `GMapOptions` class.
+        Options that define the Google Map region Bokeh will plot.
+    """
+
+    Australia_lat = -27.46749  # Coords the map is centred on.
+    Australia_lon = 133.02809
+
+    map_options = GMapOptions(lat=Australia_lat, lng=Australia_lon, 
+                              map_type="roadmap", zoom=4)
+
+    return map_options
+
+
+def get_google_key(key_dir="."):
+    """
+    Grabs the Google Maps API key from a file.
+
+    This is kept locally on my machine so I don't expose it on Github.
+
+    Function assumes the key is kept in a file called 'keys.txt'.
+
+    Parameters
+    ----------
+
+    key_dir: String. Optional, default "." 
+        Directory that contains the file with key. 
+
+    Returns
+    ----------
+
+    key: String. Required.
+        The Google Maps API key.
+    """
+    
+    fname = "{0}/keys.txt".format(key_dir)
+   
+    with open(fname, "r") as f:
+        key = f.read()
+
+    return key
+
 
 def plot_locations(data): 
     """
@@ -140,18 +203,11 @@ def plot_locations(data):
     None.  The figure is saved in the directory as "test.png".
     """
 
+    output_file("test.html")
+
     # First let's draw the map of Australia.
-    Australia_lat = -27.46749  # These are the coords the map is centred on.
-    Australia_lon = 133.02809
 
-    map = Basemap(projection='lcc',
-                  width=4e6, height=4e6,
-                  lat_0=Australia_lat, lon_0=Australia_lon)
-
-    map.drawstates(color='lightgray')
-    map.drawstates(color='black')  # Draw state borders.
-    map.fillcontinents(color='lightgray')
-    map.drawcoastlines()
+    map_options = get_Gmap_options()
 
     # Now we have Australia drawn, let's mark the 4 ASTRO3D Cities.
     city_lon = [144.96332, # Melbourne
@@ -163,14 +219,6 @@ def plot_locations(data):
                 -35.28346, # Canberra
                 -33.865143, # Sydney
                 -31.95224] # Perth
-
-    city_x, city_y = map(city_lon, city_lat)
-
-    map.scatter(city_x, city_y, marker='o', color='m', s = 50, 
-                zorder=10, label = r"$\textbf{Lead Institutes}$")
-    #plt.annotate(r'$\textbf{Melbourne}$', xy=(city_x[0], city_y[0]), xycoords='data',
-    #             xytext=(-11, -15), textcoords='offset points',
-    #             color='r')
 
     # Now it's time to calculate the means of the various groups.
     # Note: The exact coords of the Unis can differ very slightly, so define
@@ -190,7 +238,12 @@ def plot_locations(data):
                -32.00469]     # Curtin. 
 
     total_weighted_lon = []
-    total_weighted_lat = [] 
+    total_weighted_lat = []
+    mean_x_array = []
+    mean_y_array = []
+    data_array = []
+    tags = []
+    my_colors = []
     for count, group in enumerate(data.keys()):
 
         weighted_lon = np.sum(np.array(data[group]) * np.array(uni_lon)) \
@@ -202,32 +255,48 @@ def plot_locations(data):
         total_weighted_lon.append(weighted_lon)
         total_weighted_lat.append(weighted_lat) 
 
-        mean_x, mean_y = map(weighted_lon, weighted_lat)
-
-        label = r'$\textbf{' + group + r'}$'
-        map.scatter(mean_x, mean_y, marker='o', 
-                    color=colors[count], s = 50, zorder=10, label = label)
+        mean_x_array.append(weighted_lon)
+        mean_y_array.append(weighted_lat)
+        data_array.append(sum(data[group]))
+        tags.append(group)
+        my_colors.append(colors[count])
 
         print("For {0} mean longitude is {1} and latitude is {2}".format(group,
               weighted_lon, weighted_lat))
 
-    # If we're plotting more than one group, plot the mean of the groups.     
+    # If we're plotting more than one group, plot the mean of the groups.
     if (len(data.keys()) > 1):
         print("The total mean longitude is {0} and latitude is {1}" \
               .format(np.mean(total_weighted_lon), np.mean(total_weighted_lat)))
 
-        total_mean_x, total_mean_y = map(np.mean(total_weighted_lon),
-                                         np.mean(total_weighted_lat)) 
+        total_mean_x, total_mean_y = (np.mean(total_weighted_lon),
+                                      np.mean(total_weighted_lat)) 
 
-        label = r'$\textbf{' + group + r'}$'
-        map.scatter(mean_x, mean_y, marker='o', 
-                    color='k', s = 50, zorder=10, label = r"$\textbf{All}$")
+        mean_x_array.append(total_mean_x)
+        mean_y_array.append(total_mean_y)
+        data_array.append(sum(data_array))
+        tags.append("Total")
+        my_colors.append(colors[count])
 
-    leg = plt.legend(loc='upper right', numpoints=1, labelspacing=0.1)
-    for t in leg.get_texts():  # Reduce the size of the text
-        t.set_fontsize(11)
+    source = ColumnDataSource(data=dict(
+                              x=mean_x_array,
+                              y=mean_y_array,
+                              numbers=data_array,
+                              group_tags=tags,
+                              color=my_colors))
 
-    plt.savefig('test.png')
+    hover = HoverTool(tooltips=[
+                      ("Group", "@group_tags"),
+                      ("Number", "@numbers")])
+
+    API_key = get_google_key()
+
+    p = gmap(API_key, map_options,
+             title="Australia", tools=[hover]) 
+    
+    p.circle('x', 'y', size=15, source=source, fill_color='color') 
+    
+    show(p) 
 
 if __name__ == '__main__':
 
