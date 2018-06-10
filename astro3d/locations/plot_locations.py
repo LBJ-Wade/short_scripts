@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 import argparse
+import h5py
 
 # Import Bokeh plotting.
 from bokeh.io import output_file, show
@@ -11,7 +12,6 @@ from bokeh.models import ColumnDataSource, GMapOptions
 from bokeh.plotting import gmap
 from bokeh.plotting import figure, output_file, show, ColumnDataSource
 from bokeh.models import HoverTool
-
 
 def parse_inputs():
     """
@@ -32,78 +32,17 @@ def parse_inputs():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-c", "--CI", dest="do_CIs",
-                        help="Flag to include CIs in calculation. Default: 1.",
-                        default=1, type=int)
-
-    parser.add_argument("-a", "--AI", dest="do_AIs",
-                        help="Flag to include AIs in calculation. Default: 1.",
-                        default=1, type=int)
-
-    parser.add_argument("-f", "--staff", dest="do_staff",
-                        help="Flag to include staff in calculation. Default: " 
-                        "1.", default=1, type=int)
-
-    parser.add_argument("-s", "--students", dest="do_students",
-                        help="Flag to include students in calculation. " 
-                        "Default: 1.", default=1, type=int)
+    parser.add_argument("-f", "--fname_in", dest="fname_in",
+                        help="Filename for the HDF5 data file containing "
+                        "the cities, the institutes at each city and the "
+                        "groups at each institute. " 
+                        "Default: './data/astro3d_data.hdf5'",
+                        default="./data/astro3d_data.hdf5", type=str)
 
     args = parser.parse_args()
     args = vars(args)
 
-    if (args["do_students"] == 0 and args["do_CIs"] == 0 and args["do_AIs"] == 0
-            and args["do_staff"] == 0):
-        print("You've turned off flags for ALL of the ASTRO3D Members.")
-        print("You must plot at least one of them!")
-        raise RuntimeError
-
-    # These are the number of people at each institute.
-    # Order is: Swinburne, UniMelbourne, ANU, UniSydney, UniWA, Curtin.
-
-    data = {}
-
-    if (args["do_CIs"] == 1):
-
-        CIs = [3,
-               3,
-               3,
-               3,
-               2,
-               1]
-        data["CIs"] = CIs
-
-    if (args["do_AIs"] == 1):
-
-        AIs = [5,
-               3,
-               10,
-               6,
-               10,
-               3]
-        data["AIs"] = AIs
-
-    if (args["do_staff"] == 1):
-
-        staff = [3,
-                 3,
-                 5,
-                 1,
-                 3,
-                 0]
-
-        data["Staff"] = staff 
-
-    if (args["do_students"] == 1):
-
-        students = [7,
-                    7,
-                    11,
-                    6,
-                    7,
-                    2]
-        data["Students"] = students
-
-    return args, data
+    return args
 
 
 def set_globalplot_properties():
@@ -185,124 +124,183 @@ def get_google_key(key_dir="."):
     return key
 
 
-def plot_locations(data): 
+def plot_cities(p, args):
+    """
+    Plots the location of the cities the institutes belong to. 
+
+    Parameters
+    ----------
+
+    p: Bokeh GMap (Google Map) Axis. 
+        Map that we're plotting the data on top of.
+
+    args: Dictionary.  Required.
+        Dictionary of arguments from the ``argparse`` package. See function
+        `parse_inputs()`.
+        Dictionary is keyed by the argument name (e.g., args['fname_in']).
+        Used to determine the data file containing the data we're using. 
+
+    Returns
+    ----------
+
+    None.  The data is plotted onto the Google Map axis. 
+    """
+
+    data_file = h5py.File(args["fname_in"],"r")
+
+    inst_name = []
+    lon = [] 
+    lat = []
+    NumPeople = []
+    for city in data_file["Cities"].keys(): 
+        for name in data_file["Cities"][city].keys():
+            inst_name.append(name)
+            lon.append(data_file["Cities"][city].attrs["Coords"][0])
+            lat.append(data_file["Cities"][city].attrs["Coords"][1])
+            NumPeople.append(data_file["Cities"][city][name].attrs["NumPeople"])
+    source = ColumnDataSource(data=dict(
+                              x=lon,
+                              y=lat,
+                              institutes=inst_name,
+                              people=NumPeople,))
+
+    plot1 = p.cross('x', 'y', size=20, source=source, angle=45, line_width=5) 
+    p.add_tools(HoverTool(renderers=[plot1], tooltips=[
+                             ("Institutes", "@institutes"),
+                             ("Number People", "@people")]))
+ 
+    data_file.close()
+
+
+def plot_group_means(p, args):
+    """
+    Plots the mean location of the groups. 
+
+    Parameters
+    ----------
+
+    p: Bokeh GMap (Google Map) Axis. 
+        Map that we're plotting the data on top of.
+
+    args: Dictionary.  Required.
+        Dictionary of arguments from the ``argparse`` package. See function
+        `parse_inputs()`.
+        Dictionary is keyed by the argument name (e.g., args['fname_in']).
+        Used to determine the data file containing the data we're using. 
+
+    Returns
+    ----------
+
+    None.  The data is plotted onto the Google Map axis. 
+    """
+
+    data_file = h5py.File(args["fname_in"],"r")
+
+    group_weighted_lon = {} 
+    group_weighted_lat = {}
+    group_names = []
+
+    total_weighted_lon = 0.0
+    total_weighted_lat = 0.0
+
+    NumPeople = {} 
+
+    for city_count, city in enumerate(data_file["Cities"].keys()): 
+        for institute in data_file["Cities"][city].keys():
+            lon = data_file["Cities"][city][institute].attrs["Coords"][0]
+            lat = data_file["Cities"][city][institute].attrs["Coords"][1]
+
+            total_weighted_lon += lon * \
+                                  data_file["Cities"][city][institute].attrs['NumPeople']
+           
+            total_weighted_lat += lat * \
+                                  data_file["Cities"][city][institute].attrs['NumPeople']
+
+            groups = data_file["Cities"][city][institute].keys()
+            for group in groups:
+                if city_count == 0:
+                    group_weighted_lon[group] = 0.0
+                    group_weighted_lat[group] = 0.0
+                    NumPeople[group] = 0.0
+
+                group_weighted_lon[group] += \
+                        data_file["Cities"][city][institute][group].value * lon 
+
+                group_weighted_lat[group] += \
+                        data_file["Cities"][city][institute][group].value * lat 
+
+                NumPeople[group] += \
+                        data_file["Cities"][city][institute][group].value 
+
+
+    for group in group_weighted_lon.keys():
+        group_weighted_lon[group] /= NumPeople[group]
+        group_weighted_lat[group] /= NumPeople[group]
+        group_names.append(group)
+
+    lon_values = [lon for lon in group_weighted_lon.values()]
+    lat_values = [lat for lat in group_weighted_lat.values()]
+    people = [num for num in NumPeople.values()]
+
+    source = ColumnDataSource(data=dict(
+                              x=lon_values,
+                              y=lat_values,
+                              group_name=group_names,
+                              people=people,))
+
+    plot2 = p.circle('x', 'y', size=15, source=source) 
+    p.add_tools(HoverTool(renderers=[plot2], tooltips=[
+                      ("Group", "@group_name"),
+                      ("Number People", "@people")]))
+    
+    data_file.close()
+
+
+def plot_data(args): 
     """
     Plots the mean location of the groups specified by the user.
 
     Parameters
     ----------
 
-    data: Dictionary, Required. 
-        Contains the data for the groups the user wishes to plot.  
-        Keyed by the name of the group.  Possible names are "CIs", "AIs",
-        "Staff" and "Students".
+    args: Dictionary.  Required.
+        Dictionary of arguments from the ``argparse`` package. See function
+        `parse_inputs()`.
+        Dictionary is keyed by the argument name (e.g., args['fname_in']).
+        Used to determine the data file containing the data we're using. 
 
     Returns
     ----------
 
-    None.  The figure is saved in the directory as "test.png".
+    None.  The figure is saved as a html file as 'test.html'. 
     """
 
     output_file("test.html")
 
-    # First let's draw the map of Australia.
-
+    # First let's get the properties of the map we're drawing. 
     map_options = get_Gmap_options()
 
-    # Now we have Australia drawn, let's mark the 4 ASTRO3D Cities.
-    city_lon = [144.96332, # Melbourne
-                149.12807, # Canberra
-                151.209900, # Sydney
-                115.8614] # Perth
-
-    city_lat = [-37.814, # Melbourne
-                -35.28346, # Canberra
-                -33.865143, # Sydney
-                -31.95224] # Perth
-
-    # Now it's time to calculate the means of the various groups.
-    # Note: The exact coords of the Unis can differ very slightly, so define
-    # them explicitly.
-    uni_lon = [145.0389546,   # SUT.
-               144.9614,      # UMelb.
-               149.11900,     # ANU.
-               151.19037,     # USyd.
-               115.817830062, # UWA.
-               115.89405]     # Curtin.
-
-    uni_lat = [-37.8221504,   # SUT. 
-               -37.7963,      # UMelb.
-               -35.28313,     # ANU.
-               -33.88915,     # USyd.
-               -31.974829434, # UWA. 
-               -32.00469]     # Curtin. 
-
-    total_weighted_lon = []
-    total_weighted_lat = []
-    mean_x_array = []
-    mean_y_array = []
-    data_array = []
-    tags = []
-    my_colors = []
-    for count, group in enumerate(data.keys()):
-
-        weighted_lon = np.sum(np.array(data[group]) * np.array(uni_lon)) \
-                       /sum(data[group])
-
-        weighted_lat = np.sum(np.array(data[group]) * np.array(uni_lat)) \
-                       /sum(data[group])
-
-        total_weighted_lon.append(weighted_lon)
-        total_weighted_lat.append(weighted_lat) 
-
-        mean_x_array.append(weighted_lon)
-        mean_y_array.append(weighted_lat)
-        data_array.append(sum(data[group]))
-        tags.append(group)
-        my_colors.append(colors[count])
-
-        print("For {0} mean longitude is {1} and latitude is {2}".format(group,
-              weighted_lon, weighted_lat))
-
-    # If we're plotting more than one group, plot the mean of the groups.
-    if (len(data.keys()) > 1):
-        print("The total mean longitude is {0} and latitude is {1}" \
-              .format(np.mean(total_weighted_lon), np.mean(total_weighted_lat)))
-
-        total_mean_x, total_mean_y = (np.mean(total_weighted_lon),
-                                      np.mean(total_weighted_lat)) 
-
-        mean_x_array.append(total_mean_x)
-        mean_y_array.append(total_mean_y)
-        data_array.append(sum(data_array))
-        tags.append("Total")
-        my_colors.append(colors[count])
-
-    source = ColumnDataSource(data=dict(
-                              x=mean_x_array,
-                              y=mean_y_array,
-                              numbers=data_array,
-                              group_tags=tags,
-                              color=my_colors))
-
-    hover = HoverTool(tooltips=[
-                      ("Group", "@group_tags"),
-                      ("Number", "@numbers")])
-
+    # Bokeh hooks into Google Maps which requires an API key.
     API_key = get_google_key()
 
+    # Now let's plot Australia!
     p = gmap(API_key, map_options,
-             title="Australia", tools=[hover]) 
-    
-    p.circle('x', 'y', size=15, source=source, fill_color='color') 
-    
+             title="Australia")
+  
+    # Plot the cities each institution belongs to.
+    plot_cities(p, args)
+
+    # Then for each group, plot the mean location of the group.
+    plot_group_means(p, args)
+
     show(p) 
+
 
 if __name__ == '__main__':
 
-    args, data = parse_inputs()
+    args = parse_inputs()
 
     set_globalplot_properties()
 
-    plot_locations(data) 
+    plot_data(args) 
 
