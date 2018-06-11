@@ -11,7 +11,7 @@ from bokeh.io import output_file, show
 from bokeh.models import ColumnDataSource, GMapOptions
 from bokeh.plotting import gmap
 from bokeh.plotting import figure, output_file, show, ColumnDataSource
-from bokeh.models import HoverTool
+from bokeh.models import HoverTool, TapTool
 
 def parse_inputs():
     """
@@ -146,28 +146,95 @@ def plot_cities(p, args):
     None.  The data is plotted onto the Google Map axis. 
     """
 
-    data_file = h5py.File(args["fname_in"],"r")
+    # First open the file that has all the data we're plotting.
+    data_file = h5py.File(args["fname_in"], "r")
 
     inst_name = []
     lon = [] 
     lat = []
-    NumPeople = []
-    for city in data_file["Cities"].keys(): 
-        for name in data_file["Cities"][city].keys():
-            inst_name.append(name)
+    NumPeople = []  # Total number of people per institute.
+    NumPeople_group = []  # Number of people per group within each institute
+                          # (will be an array of dicts). 
+
+    # We need to count manually (i.e. without `enumerate`) because some cities
+    # have multiple institutes.
+    count = 0
+
+    # The group structure for `data_file` is first keyed by each city that
+    # contains an institute.  Each institute then has an entry, with each group
+    # then having an entry inside it.
+    # E.g., data_file["Cities"]["Melbourne"]["Swinburne University of
+    # Technology"]["CIs"].value would give the number of CIs at Swinburne.
+
+    for city in data_file["Cities"].keys():
+        for institute in data_file["Cities"][city].keys():
+
+            inst_name.append(institute)
             lon.append(data_file["Cities"][city].attrs["Coords"][0])
             lat.append(data_file["Cities"][city].attrs["Coords"][1])
-            NumPeople.append(data_file["Cities"][city][name].attrs["NumPeople"])
-    source = ColumnDataSource(data=dict(
-                              x=lon,
-                              y=lat,
-                              institutes=inst_name,
-                              people=NumPeople,))
+            NumPeople.append(data_file["Cities"][city][institute].attrs["NumPeople"])
 
-    plot1 = p.cross('x', 'y', size=20, source=source, angle=45, line_width=5) 
-    p.add_tools(HoverTool(renderers=[plot1], tooltips=[
-                             ("Institutes", "@institutes"),
-                             ("Number People", "@people")]))
+            groups = data_file["Cities"][city][institute].keys()
+
+            NumPeople_group.append({})
+
+            for group in groups:
+                NumPeople_group[count][group] = \
+                data_file["Cities"][city][institute][group].value 
+
+            count += 1 
+
+    # Now that we've got the number of people within each institute, we need to
+    # construct an array that holds the number of people within each group.
+    # This needs to be an array because Bokeh only likes them.  The structure
+    # of this will be:
+
+    # total_NumPeople_group = [[AIs at SUT, AIs at UMelb, AIs at ANU,...,],
+    #                          [CIs at SUT, CIs at UMelb, CIs at ANU,...,],
+    #                          [etc...]]
+    group_names = [x for x in NumPeople_group[0].keys()]
+    total_NumPeople_group = [[] for x in range(len(group_names))]
+
+    for count in range(len(inst_name)):
+        for group_num, group in enumerate(NumPeople_group[count]): 
+            total_NumPeople_group[group_num].append(NumPeople_group[count][group])
+
+    # We need to feed a dictionary into Bokeh so it knows what to list when we
+    # hover over each point.
+    data = dict(x=lon,
+                y=lat,
+                institutes=inst_name,
+                people=NumPeople,)
+
+    # Now lets add each of the groups to this dictionary...
+    for count, group in enumerate(group_names): 
+        data[group] = total_NumPeople_group[count]
+
+    # Then turn it into a Bokeh friendly format.
+    source = ColumnDataSource(data=data)
+
+    # Plot a Cross at each of the capital cities.
+    # Note: For places such as Melbourne that have multiple institutes, we
+    # actually plot two Crosses but they're at the exact same lat/long.
+    plot1 = p.cross('x', 'y', size=20, source=source, angle=45, line_width=5)
+
+    # Then generate the tooltips that will be shown when the user hovers over a
+    # point.
+    tooltips = [("Institute", "@institutes"),
+                ("Number People", "@people")]
+
+    # Finally need to append the composition of each group at each institute to
+    # these tooltips.
+    for group in group_names:
+        tooltip_name = group
+        tooltip_value = "@{0}".format(group)
+
+        tooltips.append((tooltip_name, tooltip_value))
+
+    # Then add them to the plot.  We explicitly only render the tooltips for
+    # these crosses as we will have other objects on the same map but we don't
+    # want the tooltips to show for them.
+    p.add_tools(HoverTool(renderers=[plot1], tooltips=tooltips))
  
     data_file.close()
 
@@ -252,7 +319,8 @@ def plot_group_means(p, args):
     p.add_tools(HoverTool(renderers=[plot2], tooltips=[
                       ("Group", "@group_name"),
                       ("Number People", "@people")]))
-    
+   
+
     data_file.close()
 
 
