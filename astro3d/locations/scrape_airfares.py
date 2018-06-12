@@ -6,6 +6,8 @@ from lxml import html
 from collections import OrderedDict
 import argparse
 from datetime import datetime
+import certifi
+import urllib3
 
 
 def parse_inputs():
@@ -69,64 +71,7 @@ def parse_inputs():
     return args
 
 
-def check_passed_dict(args):
-    """
-    To scrape the airfare data we require a source + destination airport and a
-    date.
-
-    This function checks the dictionary passed to the functions contain all of
-    these variables.
-
-    If not, then a status of 1 is returned and a ValueError raised by the
-    calling function.
-
-    Parameters
-    ----------
-
-    args: Dictionary. Required.
-        Dictionary of arguments from the ``argparse`` package.
-        This contains information such as the source + destination airport and
-        the date.
-
-    Returns
-    ----------
-
-    Either 0 or 1.
-        If all three variables (`source_airport`, `dest_airport` and `date`)
-        are present 0 is returned.  Otherwise 1 is returned.
-
-        The calling function handles the raising of the error to allow easier
-        debugging.
-    """
-
-    try:
-        source_airport = args["source_airport"]
-    except KeyError:
-        print("Attempted to call a function with an `args` dictionary that did"
-              " not contain an entry for `source_airport`.  Ensure the passed "
-              "dictionary contains this variable.")
-        return 1 
-
-    try:
-        dest_airport = args["dest_airport"]
-    except KeyError:
-        print("Attempted to call a function with an `args` dictionary that did"
-              " not contain an entry for `dest_airport`.  Ensure the passed "
-              "dictionary contains this variable.")
-        return 1 
-
-    try:
-        date = args["date"]
-    except KeyError:
-        print("Attempted to call a function with an `args` dictionary that did"
-              " not contain an entry for `date`.  Ensure the passed "
-              "dictionary contains this variable.")
-        return 1 
-
-    return 0
-
-
-def scrape_airfares(args):
+def scrape_airfares(source_airport, dest_airport, date):
     """
     Gets airfare prices from Expedia.
 
@@ -136,13 +81,14 @@ def scrape_airfares(args):
     Parameters
     ----------
 
-    args: Dictionary. Required.
-        Dictionary of arguments from the ``argparse`` package.
-        This contains information such as the source + destination airport and
-        the date.
+    source_airport: String. Required.
+        The airport code where we're leaving from.    
 
-        If any of these three variables are not present in the dictionary a
-        ValueError is raised.
+    dest_airport: String. Required. 
+        The airport code where we're arriving at. 
+    
+    date: String. Required. 
+        The date we're scraping airfares for. Must be in 'DD/MM/YYYY' format. 
 
     Returns
     ----------
@@ -153,26 +99,26 @@ def scrape_airfares(args):
         saved out as a .json file.
     """
 
-    # First check that the passed dictionary contains all the required
-    # arugments.
-
-    status = check_passed_dict(args)
-    if status != 0:
-        raise ValueError 
-
-    source_airport = args["source_airport"]
-    dest_airport = args["dest_airport"]
+    print("Scraping airfares from {0} to {1} on {2}".format(source_airport,
+                                                            dest_airport,
+                                                            date))
 
     # Expedia is an American website so need to use the date as 'MM/DD/YYYY'.
-    dt = datetime.strptime(args["date"], "%d/%m/%Y")
+    dt = datetime.strptime(date, "%d/%m/%Y")
     date_string = "{0}/{1}/{2}".format(dt.month, dt.day, dt.year)
+
+    http = urllib3.PoolManager(
+           cert_reqs='CERT_REQUIRED',
+           ca_certs=certifi.where())
 
     url="https://www.expedia.com/Flights-Search?trip=oneway&leg1=from:{0},to:{1},departure:{2}TANYT&passengers=adults:1,children:0,seniors:0,infantinlap:Y&options=cabinclass%3Aeconomy&mode=search&origref=www.expedia.com".format(source_airport,dest_airport,date_string)
 
+    print(url)
     headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.90 Safari/537.36'}
     response = requests.get(url, headers=headers, verify=False)
     parser = html.fromstring(response.text)
     json_data_xpath = parser.xpath("//script[@id='cachedResultsJson']//text()")
+
     raw_json =json.loads(json_data_xpath[0] if json_data_xpath else '')
     flight_data = json.loads(raw_json["content"])
 
@@ -246,7 +192,8 @@ def scrape_airfares(args):
     return flightlist 
 
 
-def save_json(data, args): 
+
+def save_json(data, source_airport, dest_airport, date):
     """
     Saves the scraped airfares as a .json file.
 
@@ -257,13 +204,14 @@ def save_json(data, args):
         A list containing all the flight information from the source airport to
         the destination airport on the date specified.
 
-    args: Dictionary. Required.
-        Dictionary of arguments from the ``argparse`` package.
-        This contains information such as the source+destination airport and
-        the date.
+    source_airport: String. Required. 
+        The source airport code we scraped data for. 
 
-        If any of these three variables are not present in the dictionary a
-        ValueError is raised.
+    dest_airport: String. Required. 
+        The destination airport code we scraped data for. 
+    
+    date: String. Required. 
+        The date we scraped data for.  Must be in 'DD/MM/YYYY' format.
 
     Returns
     ----------
@@ -271,11 +219,6 @@ def save_json(data, args):
     None.  The .json file is saved as
     '<source_airport>_<dest_aiport>_<day>_<month>_<year>.json'
     """
-
-
-    status = check_passed_dict(args)
-    if status != 0:
-        raise RuntimeError
 
     dt = datetime.strptime(args["date"], "%d/%m/%Y")
 
@@ -295,6 +238,9 @@ if __name__ == '__main__':
 
     args = parse_inputs()
 
-    scraped_data = scrape_airfares(args)
+    scraped_data = scrape_airfares(args["source_airport"],
+                                   args["dest_airport"],
+                                   args["date"])
       
-    save_json(scraped_data, args)
+    save_json(scraped_data, args["source_airport"], args["dest_airport"],
+              args["date"])

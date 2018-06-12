@@ -13,6 +13,15 @@ from bokeh.plotting import gmap
 from bokeh.plotting import figure, output_file, show, ColumnDataSource
 from bokeh.models import HoverTool, TapTool
 
+import locale 
+locale.setlocale(locale.LC_ALL, '') 
+
+# My airline scraping
+import scrape_airfares as scr
+
+# USD to AUD.
+exchange_rate = 1.31
+
 def parse_inputs():
     """
     Parses the command line input arguments.
@@ -139,6 +148,19 @@ def get_google_key(key_dir="."):
     return key
 
 
+def determine_fares(city, city_dest, date):
+
+    airfares = scr.scrape_airfares(city, city_dest, date)
+    
+    num_flights = len(airfares)
+    prices = []
+
+    for trip_num in range(0, num_flights):
+        prices.append(float(airfares[trip_num]['ticket price']))
+
+    return prices
+
+
 def plot_cities(p, args):
     """
     Plots the location of the cities the institutes belong to. 
@@ -181,7 +203,9 @@ def plot_cities(p, args):
     # E.g., data_file["Cities"]["Melbourne"]["Swinburne University of
     # Technology"]["CIs"].value would give the number of CIs at Swinburne.
 
-    for city in data_file["Cities"].keys():
+    cities = data_file["Cities"].keys()
+
+    for city in cities:
         for institute in data_file["Cities"][city].keys():
 
             inst_name.append(institute)
@@ -198,6 +222,29 @@ def plot_cities(p, args):
                 data_file["Cities"][city][institute][group].value 
 
             count += 1 
+
+    cost_to_city = {}
+
+    # If a date is passed at Runtime we want to determine the airfares at
+    # the date.
+
+    if len(cities) > 1 and args["date"]:
+        for city in cities:
+        # We need to get the airfares from every combination of cities.
+            cost_to_city[city] = 0.0
+            for city_dest in cities:
+                if city_dest == city:  # Don't travel to itself!
+                    continue
+
+                prices = determine_fares(city, city_dest, args["date"])
+                cost_to_city[city] += np.mean(prices)* \
+                                      data_file["Cities"][city].attrs["NumPeople"] 
+
+    print("The cost to hold a meeting in each city is:")
+    for city in cost_to_city.keys():
+        print("{0}: {1}".format(city, 
+                                locale.currency(cost_to_city[city]*exchange_rate,
+                                                grouping=True)))
 
     # Now that we've got the number of people within each institute, we need to
     # construct an array that holds the number of people within each group.
