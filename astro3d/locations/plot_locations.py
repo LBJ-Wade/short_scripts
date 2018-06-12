@@ -32,12 +32,27 @@ def parse_inputs():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-f", "--fname_in", dest="fname_in",
-                        help="Filename for the HDF5 data file containing "
-                        "the cities, the institutes at each city and the "
-                        "groups at each institute. " 
-                        "Default: './data/astro3d_data.hdf5'",
-                        default="./data/astro3d_data.hdf5", type=str)
+
+    # Taken from
+    # https://stackoverflow.com/questions/24180527/argparse-required-arguments-listed-under-optional-arguments
+    # Normally `argparse` lists all arguments as 'optional'.  However some of
+    # my arguments are required so this hack makes `parser.print_help()`
+    # properly show that they are.
+
+    parser._action_groups.pop()
+    required = parser.add_argument_group('required arguments')
+    optional = parser.add_argument_group('optional arguments')
+
+    optional.add_argument("-d", "--date", dest="date",
+                          help="Date for the meeting. 'DD/MM/YYYY'",
+                          type=str)
+
+    optional.add_argument("-f", "--fname_in", dest="fname_in",
+                          help="Filename for the HDF5 data file containing "
+                          "the cities, the institutes at each city and the "
+                          "groups at each institute. " 
+                          "Default: './data/astro3d_data.hdf5'",
+                          default="./data/astro3d_data.hdf5", type=str)
 
     args = parser.parse_args()
     args = vars(args)
