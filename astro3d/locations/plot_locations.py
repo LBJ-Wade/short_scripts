@@ -12,6 +12,7 @@ from bokeh.models import ColumnDataSource, GMapOptions
 from bokeh.plotting import gmap
 from bokeh.plotting import figure, output_file, show, ColumnDataSource
 from bokeh.models import HoverTool, TapTool
+from bokeh.layouts import row, column, gridplot
 
 import locale 
 locale.setlocale(locale.LC_ALL, '') 
@@ -161,14 +162,14 @@ def determine_fares(city, city_dest, date):
     return prices
 
 
-def plot_cities(p, args):
+def plot_cities(GMap, airfare_plot, args):
     """
     Plots the location of the cities the institutes belong to. 
 
     Parameters
     ----------
 
-    p: Bokeh GMap (Google Map) Axis. 
+    GMap: Bokeh GMap (Google Map) Axis. 
         Map that we're plotting the data on top of.
 
     args: Dictionary.  Required.
@@ -223,28 +224,36 @@ def plot_cities(p, args):
 
             count += 1 
 
-    cost_to_city = {}
-
     # If a date is passed at Runtime we want to determine the airfares at
     # the date.
 
+    airfare_cost = {}
+    mean_cost = {}
+
+    for city in cities:
+        mean_cost[city] = 0.0
+
     if len(cities) > 1 and args["date"]:
         for city in cities:
-        # We need to get the airfares from every combination of cities.
-            cost_to_city[city] = 0.0
+            airfare_cost[city] = {}
+
+            # We need to get the airfares from every combination of cities.
             for city_dest in cities:
                 if city_dest == city:  # Don't travel to itself!
                     continue
 
                 prices = determine_fares(city, city_dest, args["date"])
-                cost_to_city[city] += np.mean(prices)* \
-                                      data_file["Cities"][city].attrs["NumPeople"] 
+                mean_cost[city_dest] = np.mean(prices)* \
+                                       data_file["Cities"][city].attrs["NumPeople"]
+                airfare_cost[city][city_dest] = prices 
 
-    print("The cost to hold a meeting in each city is:")
-    for city in cost_to_city.keys():
-        print("{0}: {1}".format(city, 
-                                locale.currency(cost_to_city[city]*exchange_rate,
-                                                grouping=True)))
+        print("The cost to hold a meeting in each city is:")
+        for city in mean_cost.keys():
+            print("{0}: {1}".format(city, 
+                                    locale.currency(mean_cost[city]*exchange_rate,
+                                                    grouping=True)))
+
+
 
     # Now that we've got the number of people within each institute, we need to
     # construct an array that holds the number of people within each group.
@@ -278,7 +287,7 @@ def plot_cities(p, args):
     # Plot a Cross at each of the capital cities.
     # Note: For places such as Melbourne that have multiple institutes, we
     # actually plot two Crosses but they're at the exact same lat/long.
-    plot1 = p.cross('x', 'y', size=20, source=source, angle=45, line_width=5)
+    plot1 = GMap.cross('x', 'y', size=20, source=source, angle=45, line_width=5)
 
     # Then generate the tooltips that will be shown when the user hovers over a
     # point.
@@ -296,19 +305,19 @@ def plot_cities(p, args):
     # Then add them to the plot.  We explicitly only render the tooltips for
     # these crosses as we will have other objects on the same map but we don't
     # want the tooltips to show for them.
-    p.add_tools(HoverTool(renderers=[plot1], tooltips=tooltips))
+    GMap.add_tools(HoverTool(renderers=[plot1], tooltips=tooltips))
  
     data_file.close()
 
 
-def plot_group_means(p, args):
+def plot_group_means(GMap, args):
     """
     Plots the mean location of the groups. 
 
     Parameters
     ----------
 
-    p: Bokeh GMap (Google Map) Axis. 
+    GMap: Bokeh GMap (Google Map) Axis. 
         Map that we're plotting the data on top of.
 
     args: Dictionary.  Required.
@@ -377,13 +386,25 @@ def plot_group_means(p, args):
                               group_name=group_names,
                               people=people,))
 
-    plot2 = p.circle('x', 'y', size=15, source=source) 
-    p.add_tools(HoverTool(renderers=[plot2], tooltips=[
+    plot2 = GMap.circle('x', 'y', size=15, source=source) 
+    GMap.add_tools(HoverTool(renderers=[plot2], tooltips=[
                       ("Group", "@group_name"),
                       ("Number People", "@people")]))
    
 
     data_file.close()
+
+
+def determine_cities(args):
+
+
+    city_names = []
+    with h5py.File(args["fname_in"], "r") as data_file:
+   
+        cities = data_file["Cities"].keys()
+        for city in cities:
+            city_names.append(city)
+    return city_names 
 
 
 def plot_data(args): 
@@ -414,17 +435,35 @@ def plot_data(args):
     API_key = get_google_key()
 
     # Now let's plot Australia!
-    p = gmap(API_key, map_options,
+    GMap = gmap(API_key, map_options,
              title="Australia")
-  
+        
+    if args["date"]:
+        city_names = determine_cities(args)
+        airfare_plots = {}
+        print(city_names)
+        for city in city_names: 
+            airfare_plots[city] = figure(plot_width=400, plot_height=400)
+    else:
+        airfare_plots = None
+
     # Plot the cities each institution belongs to.
-    plot_cities(p, args)
+    plot_cities(GMap, airfare_plots, args)
 
     # Then for each group, plot the mean location of the group.
-    plot_group_means(p, args)
+    plot_group_means(GMap, args)
 
-    show(p) 
+    if args["date"]:      
+        grid = []
+        for city in city_names: 
+            grid.append(airfare_plots[city])
 
+        my_grid = gridplot(grid, ncols=2, plot_width=250, plot_height=250)
+
+        show(row(GMap, my_grid))
+    else:
+        print(GMap)
+        show(GMap)
 
 if __name__ == '__main__':
 
