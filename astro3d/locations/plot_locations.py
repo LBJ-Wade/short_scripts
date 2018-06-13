@@ -157,12 +157,48 @@ def determine_fares(city, city_dest, date):
     prices = []
 
     for trip_num in range(0, num_flights):
-        prices.append(float(airfares[trip_num]['ticket price']))
+        if airfares[trip_num]["stops"] != "Nonstop":
+            continue
 
+        prices.append(float(airfares[trip_num]['ticket price'])*exchange_rate)
+
+    print(airfares)
     return prices
 
 
-def plot_cities(GMap, airfare_plot, args):
+def deal_with_airfares(args, data_file, cities):
+
+    mean_cost = {}
+    airfare_cost = {}
+
+    for city in cities:
+        mean_cost[city] = 0.0
+
+    for city in cities:
+        airfare_cost[city] = {}
+
+        # We need to get the airfares from every combination of cities.
+        for count, city_dest in enumerate(cities):
+            if city_dest == city:  # Don't travel to itself!
+                continue
+
+            prices = determine_fares(city, city_dest, args["date"])
+            mean_cost[city_dest] += np.mean(prices)* \
+                                   data_file["Cities"][city].attrs["NumPeople"]
+            airfare_cost[city][city_dest] = prices 
+
+            print("{0} to {1} costs {2}".format(city, city_dest, prices))
+
+    print("The cost to hold a meeting in each city is:")
+    for city in mean_cost.keys():
+        print("{0}: {1}".format(city, 
+                                locale.currency(mean_cost[city]*exchange_rate,
+                                                grouping=True)))
+
+    return airfare_cost
+
+
+def plot_cities(GMap, airfare_plots, args):
     """
     Plots the location of the cities the institutes belong to. 
 
@@ -227,33 +263,18 @@ def plot_cities(GMap, airfare_plot, args):
     # If a date is passed at Runtime we want to determine the airfares at
     # the date.
 
-    airfare_cost = {}
-    mean_cost = {}
-
-    for city in cities:
-        mean_cost[city] = 0.0
-
     if len(cities) > 1 and args["date"]:
-        for city in cities:
-            airfare_cost[city] = {}
+        airfare_cost = deal_with_airfares(args, data_file, cities)
 
-            # We need to get the airfares from every combination of cities.
-            for city_dest in cities:
-                if city_dest == city:  # Don't travel to itself!
-                    continue
-
-                prices = determine_fares(city, city_dest, args["date"])
-                mean_cost[city_dest] = np.mean(prices)* \
-                                       data_file["Cities"][city].attrs["NumPeople"]
-                airfare_cost[city][city_dest] = prices 
-
-        print("The cost to hold a meeting in each city is:")
-        for city in mean_cost.keys():
-            print("{0}: {1}".format(city, 
-                                    locale.currency(mean_cost[city]*exchange_rate,
-                                                    grouping=True)))
-
-
+        airfares = [[] for x in range(len(cities))]
+        for count, city in enumerate(cities):
+            for dest_city in cities:
+                if dest_city == city:
+                    airfares[count].append([])
+                else:      
+                    airfares[count].append(airfare_cost[city][dest_city])
+            
+    
 
     # Now that we've got the number of people within each institute, we need to
     # construct an array that holds the number of people within each group.
@@ -280,6 +301,27 @@ def plot_cities(GMap, airfare_plot, args):
     # Now lets add each of the groups to this dictionary...
     for count, group in enumerate(group_names): 
         data[group] = total_NumPeople_group[count]
+
+    if args["date"]:
+        for city_count, city in enumerate(cities):
+            airfares_to_show = []
+            for dest_count, dest_city in enumerate(cities):
+                if dest_city == city:
+                    airfares_to_show.append(0.0)
+                    continue
+                airfares_this_city = airfares[city_count][dest_count]
+                airfares_to_show.append(np.median(airfares_this_city))
+
+                #plot3 = airfare_plots[dest_city].circle(range(len(airfares_this_city)),
+                #                                        airfares_this_city, 
+                #                                        color=colors[city_count]) 
+            airfare_plots[city].vbar(x=list(cities), 
+                                     top=airfares_to_show,
+                                     width=0.5) 
+
+            airfare_plots[city].yaxis.axis_label = "Median Price"
+
+            #data[city] = airfares_to_show 
 
     # Then turn it into a Bokeh friendly format.
     source = ColumnDataSource(data=data)
@@ -441,9 +483,12 @@ def plot_data(args):
     if args["date"]:
         city_names = determine_cities(args)
         airfare_plots = {}
-        print(city_names)
+
         for city in city_names: 
-            airfare_plots[city] = figure(plot_width=400, plot_height=400)
+            airfare_plots[city] = figure(x_range=city_names, plot_width=400, 
+                                         plot_height=400, tools="", 
+                                         toolbar_location=None,
+                                         title=city)
     else:
         airfare_plots = None
 
