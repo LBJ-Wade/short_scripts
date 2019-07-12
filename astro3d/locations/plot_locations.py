@@ -23,7 +23,7 @@ import scrape_airfares as scr
 # USD to AUD.
 exchange_rate = 1.31
 
-def parse_inputs():
+def parse_input():
     """
     Parses the command line input arguments.
 
@@ -41,7 +41,6 @@ def parse_inputs():
     """
 
     parser = argparse.ArgumentParser()
-
 
     # Taken from
     # https://stackoverflow.com/questions/24180527/argparse-required-arguments-listed-under-optional-arguments
@@ -92,7 +91,8 @@ def set_globalplot_properties():
     plt.rc('legend', numpoints=1, fontsize='x-large')
     plt.rc('text', usetex=True)
     #colors = ['r', 'b', 'g', 'c']
-    colors = ['#7b3294','#a4225f', '#a6dba0', '#d7191c','#d01c8b','#a6611a']
+    colors = ['#7b3294','#a4225f', '#a6dba0', '#d7191c']
+            #,'#d01c8b','#a6611a']
 
 
 def get_Gmap_options():
@@ -162,7 +162,6 @@ def determine_fares(city, city_dest, date):
 
         prices.append(float(airfares[trip_num]['ticket price'])*exchange_rate)
 
-    print(airfares)
     return prices
 
 
@@ -426,9 +425,11 @@ def plot_group_means(GMap, args):
                               x=lon_values,
                               y=lat_values,
                               group_name=group_names,
-                              people=people,))
+                              people=people,
+                              fill_colors=colors,))
 
-    plot2 = GMap.circle('x', 'y', size=15, source=source) 
+    plot2 = GMap.circle('x', 'y', size=15, source=source,
+                        fill_color='fill_colors')
     GMap.add_tools(HoverTool(renderers=[plot2], tooltips=[
                       ("Group", "@group_name"),
                       ("Number People", "@people")]))
@@ -512,7 +513,7 @@ def plot_data(args):
 
 if __name__ == '__main__':
 
-    args = parse_inputs()
+    args = parse_input()
 
     set_globalplot_properties()
 

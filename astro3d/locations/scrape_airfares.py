@@ -116,7 +116,8 @@ def scrape_airfares(source_airport, dest_airport, date):
     print(url)
     headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.90 Safari/537.36'}
     response = requests.get(url, headers=headers, verify=False)
-    parser = html.fromstring(response.text)
+
+    parser = html.fromstring(response.content)
     json_data_xpath = parser.xpath("//script[@id='cachedResultsJson']//text()")
 
     raw_json =json.loads(json_data_xpath[0] if json_data_xpath else '')
