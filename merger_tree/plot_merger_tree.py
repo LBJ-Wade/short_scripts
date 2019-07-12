@@ -188,7 +188,7 @@ def get_cmap_map(cmap_name, min_val, max_val, cmap_dir=None):
     Returns
     -------
 
-    m: matplotlib.cm.ScalarMappable
+    m: ``matplotlib.cm.ScalarMappable``
         A colormap map scaled by the min/max values.
     """
 
@@ -254,7 +254,7 @@ if __name__ == '__main__':
     cmap_dir = "./colormaps"  # Colormap is located in `./colormaps` directory.
     min_val = 7  # log10(Msun).
     max_val = 12  # log10(Msun).
-    cmap_map = get_cmap_map(cmap, min_val, max_val,  cmap_dir="./colormaps")
+    cmap_map = get_cmap_map(cmap, min_val, max_val, cmap_dir="./colormaps")
 
     # To make things easier and to make a better plot, let's read the first tree that has
     # exactly 1 FoF halo.
