@@ -1,17 +1,14 @@
 #!/usr/bin:env python
 from __future__ import print_function
 import numpy as np
-import ytree
-import argparse
+import networkx as nx
+import pygraphviz as pgv
+from matplotlib import pyplot as plt
 
 
-
-def parse_inputs():
+def get_LHalo_datastruct():
     """
-    Parses the command line input arguments.
-
-    If there has not been an input or output file specified a RuntimeError will
-    be raised.
+    Generates the LHalo numpy structured array.
 
     Parameters
     ----------
@@ -21,83 +18,173 @@ def parse_inputs():
     Returns
     ----------
 
-    args: Dictionary.  Required.
-        Dictionary of arguments from the ``argparse`` package.
-        Dictionary is keyed by the argument name (e.g., args['fname_in']).
+    LHalo_Desc: numpy structured array.  Required.
+        Structured array for the LHaloTree data format.
     """
 
-    parser = argparse.ArgumentParser()
+    LHalo_Desc_full = [
+        ('Descendant',          np.int32),
+        ('FirstProgenitor',     np.int32),
+        ('NextProgenitor',      np.int32),
+        ('FirstHaloInFOFgroup', np.int32),
+        ('NextHaloInFOFgroup',  np.int32),
+        ('Len',                 np.int32),
+        ('M_mean200',           np.float32),
+        ('Mvir',                np.float32),
+        ('M_TopHat',            np.float32),
+        ('Pos',                 (np.float32, 3)),
+        ('Vel',                 (np.float32, 3)),
+        ('VelDisp',             np.float32),
+        ('Vmax',                np.float32),
+        ('Spin',                (np.float32, 3)),
+        ('MostBoundID',         np.int64),
+        ('SnapNum',             np.int32),
+        ('FileNr',              np.int32),
+        ('SubHaloIndex',        np.int32),
+        ('SubHalfMass',         np.float32)
+                         ]
 
-    parser.add_argument("-s", "--simulation", dest="simulation",
-                        help="Name of the simulation to be visualized. "
-                             "Required.")
-    parser.add_argument("-f", "--fname", dest="treepath",
-                        help="Path to one of the trees. Required")
+    names = [LHalo_Desc_full[i][0] for i in range(len(LHalo_Desc_full))]
+    formats = [LHalo_Desc_full[i][1] for i in range(len(LHalo_Desc_full))]
+    LHalo_Desc = np.dtype({'names': names, 'formats': formats}, align=True)
 
-    args = parser.parse_args()
+    return LHalo_Desc
 
-    # We require an input file and an output one.
-    if (args.simulation is None or args.treepath is None):
-        parser.print_help()
-        raise RuntimeError
+def read_tree(tree_path, tree_num=None, num_root_fofs=None, root_snap_num=None):
 
-    # Print some useful startup info. #
-    print("")
-    print("Running for simulation {0}".format(args.simulation))
-    print("")
+    if tree_num and num_root_fofs:
+        print(f"Only one of `tree_num` and `num_root_fofs` can be not `None. Current "
+              f"values are {tree_num} and {num_root_fofs} respectively.")
+        raise ValueError
 
-    return vars(args)
+    if num_root_fofs and not root_snap_num:
+        print(f"If selecting a tree based on the number of root FoFs, `root_snap_num` "
+              f"must be specified.")
+        raise ValueError
+
+    LHalo_struct = get_LHalo_datastruct()
+
+    with open(tree_path, "rb") as f_in:
+
+        # First get header info.
+        NTrees = np.fromfile(f_in, np.dtype(np.int32), 1)[0]
+        NHalos = np.fromfile(f_in, np.dtype(np.int32), 1)[0]
+        NHalosPerTree = np.fromfile(f_in, np.dtype((np.int32, NTrees)), 1)[0]
+
+        if tree_num:
+            if tree_num > NTrees:
+                print(f"The number of trees in file {tree_path} is {NTrees}. You requested to "
+                      f"return tree {tree_num}.")
+                raise ValueError
+
+        # We could be sneaky and `fseek` to the correct point in the file. However, because
+        # I'm lazy, I'm just going to iterate over the trees until we reach the desired one.
+        for tree_idx in range(NTrees):
+
+            tree = np.fromfile(f_in, LHalo_struct, NHalosPerTree[tree_idx])
+
+            if num_root_fofs is not None:
+                if len(np.where(tree["SnapNum"][:] == root_snap_num)[0]) == num_root_fofs:
+                    print(f"Tree {tree_idx} has {num_root_fofs} root FoFs and a total of "
+                          f"{len(tree)} halos. Returning it.")
+                    return tree
+
+            if tree_num:
+                if tree_idx == tree_num:
+                    print(f"Returning tree {tree_num}")
+                    return tree
+
+    # If we reach here, we didn't hit the desired tree number or number of root FoFs somehow.
+    print(f"After searching through all trees in {tree_path}, we could not find tree "
+          f"number {tree_num} or a tree with {num_root_fofs} root FoFs.")
+    raise ValueError
+
+    return None
 
 
-def set_parameters(simulation):
+def fully_walk_tree(start_idx, tree):
+    """
+    Code taken from https://github.com/manodeep/LHaloTreeReader
+    """
 
-    if simulation == "Kali":
-        Hubble_h = 0.681
-        Omega_m = 0.302
-        Omega_L = 0.698
-        Omega_b = 0.0452
-        BoxSize = 108.96 # Mpc/h
-        Volume = BoxSize**3
-        BaryonFrac = 0.17
-        Y = 0.24   
-        PartMass = 7.8436e6# Msun/h 
-        a = np.loadtxt("/lustre/projects/p134_swin/jseiler/kali/a_list.txt")
-    elif simulation == "Mini-Millennium":
-        Hubble_h = 0.73
-        Omega_m = 0.25
-        Omega_L = 0.75
-        Omega_b = 0.0
-        BoxSize = 62.5 # Mpc/h
+    curr_halo = start_idx
 
-        a = np.loadtxt("/home/jseiler//sage/input/treefiles/millennium_mini/millennium.a_list")
+    if tree["FirstProgenitor"][curr_halo] != -1:
+        return tree[curr_halo]["FirstProgenitor"]
 
-    parameters = dict(HubbleParam=Hubble_h, Omega0=Omega_m, OmegaLambda=Omega_L,
-                      BoxSize=BoxSize, PeriodicBoundariesOn=1, ComovingIntegrationOn=1,
-                      UnitVelocity_in_cm_per_s=100000, UnitLength_in_cm=3.08568e+24,
-                      UnitMass_in_g=1.989e+43)
-    scale_factors = a
+    if tree["NextProgenitor"][curr_halo] != -1:
+        return tree["NextProgenitor"][curr_halo]
 
-    return parameters, scale_factors
-    
+    while tree["NextProgenitor"][curr_halo] == -1 and tree["Descendant"][curr_halo] != -1:
+        curr_halo = tree["Descendant"][curr_halo]
+
+    return tree["NextProgenitor"][curr_halo]
+
+
+def plot_graph(G, plot_output_path, plot_output_format="png"):
+
+    fig = plt.figure(figsize=(16,16))
+    ax = fig.add_subplot(111)
+
+    """
+    pos = nx.spring_layout(G)
+
+    for node_num in pos.keys():
+        pos[node_num][1] = G.nodes[node_num]["snapnum"]
+    """
+    nx.draw_networkx(G, pos)
+
+    fig.tight_layout()
+
+    output_file = "{0}/merger_tree.{1}".format(plot_output_path, plot_output_format)
+    fig.savefig(output_file)
+    print("Saved file to {0}".format(output_file))
+    plt.close()
+
 
 if __name__ == '__main__':
 
-    args = parse_inputs()
-    parameters, scale_factors = set_parameters(args["simulation"])  
-    trees = ytree.load(args["treepath"],
-                   parameters=parameters,
-                   scale_factors=scale_factors)
+    # To make things easier and to make a better plot, let's read the first tree that has
+    # exactly 1 FoF halo.
+    tree_path = "/fred/oz004/jseiler/kali/shifted_trees/subgroup_trees_000.dat"
+    num_root_fofs = 1
+    root_snap_num = 98
+    tree = read_tree(tree_path, num_root_fofs=num_root_fofs, root_snap_num=root_snap_num)
 
-    my_tree = trees[50] # Tree 0.
-    w = np.where(my_tree["tree", "SnapNum"] == 50)[0]
-    print("The FirstHaloInFOFgroup for halos at snapshot 50 are "
-          "{0}".format(my_tree["tree", "FirstHaloInFOFgroup"][w]))
-    print("The Descendants for halos at snapshot 50 are "
-          "{0}".format(my_tree["tree", "Descendant"][w]))
-    w_desc = my_tree["tree", "Descendant"][w] 
-    print("The snapshot of the Descendants for halos at snapshot 50 are "
-          "{0}".format(my_tree["tree", "SnapNum"][w_desc]))
-    print("The Len for halos at snapshot 50 are "
-          "{0}".format(my_tree["tree", "Len"][w]))
-    #print(trees.field_info)
-    #print(my_tree["tree", "SnapNum"])
+    # Initialize the graph.
+    G = nx.Graph()
+
+    # When we plot, we want to order them by their snapshots. When we go through the tree,
+    # we will need to remember which halo is at which snapshot.
+    halo_snapshot = {}
+
+    # Our graph is drawing edges between each halo and its descendant. Hence let's just go
+    # through each halo, and add an edge between the halo and the desc.
+    for halo_idx in range(len(tree)):
+
+        snapnum = tree["SnapNum"][halo_idx]
+        G.add_node(halo_idx, snapnum=snapnum)
+
+        desc_idx = tree["Descendant"][halo_idx]
+        # Halos without descendants have `desc_idx == -1`.
+        if desc_idx != -1:
+            G.add_edge(halo_idx, desc_idx, )
+
+        # Check to see if this snapshot has been added to the dictionary.
+        try:
+            halo_snapshot[snapnum].append(halo_idx)
+        except KeyError:
+            halo_snapshot[snapnum] = [halo_idx]
+
+    # We will now add the ranks to ensure the graph is ordered by snapshot.
+
+    # First convert the graph into a pygraphviz one.
+    A = nx.to_agraph(G)
+
+    # Now loop through each snapshot and add the ranks as subgraphs.
+    for snapnum in halo_snapshot.keys():
+        nodes_for_rank = halo_snapshot[snapnum]
+        _ = A.add_subgraph(nodes_for_rank, rank="same")
+
+    A.draw("plots/merger_tree.png")
+    print("EOHROQEJ")
