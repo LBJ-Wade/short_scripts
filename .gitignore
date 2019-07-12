@@ -1,3 +1,6 @@
 *.pyc
 lhalo_to_hdf5/*trees*
+
 harley_wood/*.csv
+subsample_grid/*.out
+
