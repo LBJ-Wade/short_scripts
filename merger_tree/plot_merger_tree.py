@@ -236,42 +236,44 @@ def convert_networkx_to_graphvis(networkx_graph, halos_per_snapshot):
     """
 
     # First convert the graph into a pygraphviz one.
-    A = nx.nx_agraph.to_agraph(G)
+    A = nx.nx_agraph.to_agraph(networkx_graph)
 
     # Now loop through each snapshot and add the ranks as subgraphs.
-    for snapnum in halo_snapshot.keys():
-        nodes_for_rank = halo_snapshot[snapnum]
+    for snapnum in halos_per_snapshot.keys():
+        nodes_for_rank = halos_per_snapshot[snapnum]
         A.add_subgraph(nodes_for_rank, rank="same")
 
     return A
 
 
-if __name__ == '__main__':
+def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
+    """
+    Plots a graph for a given LHaloTree ``tree`` at the specified snapshots.
 
-    # When we plot the halo nodes, we want to color them based onstellar mass. Hence
-    # let's first generate a map that will be used to do ``mass -> rgb value``. 
-    cmap = "rainforest_r"  # Going to use Ellert's Rainforest colormap. Requires e13tools.
-    cmap_dir = "./colormaps"  # Colormap is located in `./colormaps` directory.
-    min_val = 7  # log10(Msun).
-    max_val = 12  # log10(Msun).
-    cmap_map = get_cmap_map(cmap, min_val, max_val, cmap_dir="./colormaps")
+    Parameters
+    ----------
 
-    # To make things easier and to make a better plot, let's read the first tree that has
-    # exactly 1 FoF halo.
-    tree_path = "./subgroup_trees_050.dat"
-    tree_num = None
-    num_root_fofs = 1 
-    root_snap_num = 98
-    num_halos = 500
-    tree = read_tree(tree_path, tree_num=tree_num, num_root_fofs=num_root_fofs,
-                     root_snap_num=root_snap_num, num_halos=num_halos)
+    tree: LHalo structure, specified by :py:func:`~get_LHalo_datastruct`
+        The tree being plotted.
+
+    snapshots_to_plot: list or array-like of ints
+        Only halos at these snapshots will be plotted.
+
+    cmap_map: ``matplotlib.cm.ScalarMappable``
+        Colormap used to color the graph nodes based on halo mass.
+
+    fname_out: string
+        Name of the output file.
+
+    Generates
+    ---------
+
+    The graph saved as ``fname_out``.
+    """
 
     # When we plot, we want to order them by their snapshots. When we go through the tree,
     # we will need to remember which halo is at which snapshot.
     halo_snapshot = {}
-
-    # Finally, we only want to plot halos at specified snapshots.
-    snapshots_to_plot = np.arange(90, root_snap_num+1)
 
     # Our graph is drawing edges between each halo and its descendant. Hence let's just go
     # through each halo, and add an edge between the halo and the desc.
@@ -312,5 +314,31 @@ if __name__ == '__main__':
     graphvis_G = convert_networkx_to_graphvis(G, halo_snapshot)
 
     # Plot time!
-    fname_out = "plots/merger_tree.png"
     graphvis_G.draw(fname_out, prog="dot")
+    print(f"Wrote plot to {fname_out}")
+
+
+if __name__ == '__main__':
+
+    # When we plot the halo nodes, we want to color them based onstellar mass. Hence
+    # let's first generate a map that will be used to do ``mass -> rgb value``. 
+    cmap = "rainforest_r"  # Going to use Ellert's Rainforest colormap. Requires e13tools.
+    cmap_dir = "./colormaps"  # Colormap is located in `./colormaps` directory.
+    min_val = 7  # log10(Msun).
+    max_val = 12  # log10(Msun).
+    cmap_map = get_cmap_map(cmap, min_val, max_val, cmap_dir="./colormaps")
+
+    # To make things easier and to make a better plot, let's read the first tree that has
+    # exactly 1 FoF halo.
+    tree_path = "./subgroup_trees_050.dat"
+    tree_num = None
+    num_root_fofs = 1 
+    root_snap_num = 98
+    num_halos = 500
+    tree = read_tree(tree_path, tree_num=tree_num, num_root_fofs=num_root_fofs,
+                     root_snap_num=root_snap_num, num_halos=num_halos)
+
+    # Time to plot the tree.
+    snapshots_to_plot = np.arange(90, root_snap_num+1)
+    fname_out = "plots/merger_tree.png"
+    plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out) 
