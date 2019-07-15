@@ -295,7 +295,7 @@ def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
         color = mpl.colors.rgb2hex(rgb)
 
         # When we add the node, we don't want silly little labels. 
-        G.add_node(halo_idx, snapnum=snapnum, color=color,
+        G.add_node(halo_idx, snapnum=snapnum, color=color, width=int(mass)/20,
                    style="filled", shape="circle", fillcolor=color, label="")
 
         # Halos without descendants have `desc_idx == -1`.
