@@ -294,8 +294,15 @@ def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
         # Turn into hex '#XXXXXX' for pygraphvis.
         color = mpl.colors.rgb2hex(rgb)
 
+        if mass > 10:
+            width = mass / 20
+        elif mass > 9 and mass <= 10:
+            width = mass / 25
+        else:
+            width = mass / 30
+
         # When we add the node, we don't want silly little labels. 
-        G.add_node(halo_idx, snapnum=snapnum, color=color, width=int(mass)/20,
+        G.add_node(halo_idx, snapnum=snapnum, color=color, width=width,
                    style="filled", shape="circle", fillcolor=color, label="")
 
         # Halos without descendants have `desc_idx == -1`.
@@ -308,6 +315,22 @@ def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
             halo_snapshot[snapnum].append(halo_idx)
         except KeyError:
             halo_snapshot[snapnum] = [halo_idx]
+
+    """
+    for halo_idx in range(len(tree)):
+
+        snapnum = tree["SnapNum"][halo_idx]
+        mass = np.log10(tree["Mvir"][halo_idx] * 1.0e10 / 0.6871)
+
+        # Don't care about this halo.
+        if snapnum not in snapshots_to_plot:
+            continue
+
+        # Also may want to add an edge to halos in the FoF group.
+        nexthaloinfof_idx = tree["NextHaloInFOFgroup"][halo_idx]
+        if nexthaloinfof_idx != -1:
+            G.add_edge(halo_idx, nexthaloinfof_idx)
+    """
 
     # The networkx graph has been constructed. We now want to turn it into a pygraphvis
     # graph and align all the halos by snapshot.
@@ -331,7 +354,7 @@ if __name__ == '__main__':
     # To make things easier and to make a better plot, let's read the first tree that has
     # exactly 1 FoF halo.
     tree_path = "./subgroup_trees_050.dat"
-    tree_num = None
+    tree_num = None 
     num_root_fofs = 1 
     root_snap_num = 98
     num_halos = 500
@@ -339,6 +362,6 @@ if __name__ == '__main__':
                      root_snap_num=root_snap_num, num_halos=num_halos)
 
     # Time to plot the tree.
-    snapshots_to_plot = np.arange(90, root_snap_num+1)
-    fname_out = "plots/merger_tree.png"
+    snapshots_to_plot = np.arange(87, root_snap_num+1)
+    fname_out = "plots/simple_merger_tree.png"
     plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out) 
