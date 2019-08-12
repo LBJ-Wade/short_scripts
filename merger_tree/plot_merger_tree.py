@@ -22,6 +22,60 @@ import matplotlib as mpl
 mpl.use('PS')  # This is necessary to get matplotlib working on Mac.
 import matplotlib.cm as cm
 
+class SimInfo(object):
+
+    def __init__(self, name, max_num_parts=10000):
+        """
+        Parameters
+        ----------
+
+        name: string
+            The name of the simulation.  Check the ``name.setter`` to see what simulations
+            are implemented.
+
+        max_num_parts: int
+            For scaling the colourbar, the maximum halo mass is assumed to be the particle
+            mass times ``max_num_parts``.  This assumption is checked when plotting the
+            tree.
+        """
+
+        self._name = name
+
+        if self.name == "Millennium":
+            self.hubble_h = 0.73
+            self.partmass = 0.0860657
+            self.root_snapnum = 63
+        elif self.name == "Kali":
+            self.hubble_h = 0.6871
+            self.partmass = 0.00078436
+            self.root_snapnum = 98
+
+        # Convert particle mass to log10(Msun).
+        self.partmass = np.log10(self.partmass * 1.0e10 / self.hubble_h)
+
+        # The absolute minimum halo mass should use the particle mass.
+        self.min_mass = self.partmass 
+
+        # For the maximum halo mass, let's take N particles. May not be always
+        # accurate, but should be a good indication. Can check this later.
+        self.max_num_parts = max_num_parts
+        self.max_mass = self.partmass + np.log10(max_num_parts)  # Careful of logs.
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, name):
+        allowed_names = ["Kali", "Millennium"]
+
+        if name not in allowed_names:
+            print(f"The requested simulation name is {name}. The only allowed "
+                  f"simulations are {allowed_name}")
+            raise ValueError
+
+        self._name = name
+
 
 def get_LHalo_datastruct():
     """
@@ -246,12 +300,15 @@ def convert_networkx_to_graphvis(networkx_graph, halos_per_snapshot):
     return A
 
 
-def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
+def plot_merger_tree(sim, tree, snapshots_to_plot, cmap_map, fname_out):
     """
     Plots a graph for a given LHaloTree ``tree`` at the specified snapshots.
 
     Parameters
     ----------
+
+    sim: :py:class:`~SimInfo`
+        Information about the simulation used for this tree.
 
     tree: LHalo structure, specified by :py:func:`~get_LHalo_datastruct`
         The tree being plotted.
@@ -278,14 +335,33 @@ def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
     # Our graph is drawing edges between each halo and its descendant. Hence let's just go
     # through each halo, and add an edge between the halo and the desc.
     G = nx.Graph()
+
+    min_mass = 999
+    max_mass = -999
+
     for halo_idx in range(len(tree)):
 
         snapnum = tree["SnapNum"][halo_idx]
-        mass = np.log10(tree["Mvir"][halo_idx] * 1.0e10 / 0.6871)
+        mass = tree["Mvir"][halo_idx] * 1.0e10 / sim.hubble_h
 
         # Don't care about this halo.
         if snapnum not in snapshots_to_plot:
             continue
+
+        # Some halos haven't been assigned a mass despite having non-zero number of
+        # particles (don't know why this is, email Volker Springel if you truly want to
+        # know) . For these, use the number of particles * particle mass to determine
+        # the mass.
+        if mass < 1e-20:
+            mass = tree["Len"][halo_idx] * sim.partmass * 1.0e10 / sim.hubble_h 
+
+        # We've handled zero mass objects, so safe to log.
+        mass = np.log10(mass)
+
+        if mass > max_mass:
+            max_mass = mass
+        if mass < min_mass:
+            min_mass = mass
 
         # Map the mass to the RGB value of the defined colormap.
         # `rgba` returns (R, G, B, A) so take first 3 indices.
@@ -294,6 +370,8 @@ def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
         # Turn into hex '#XXXXXX' for pygraphvis.
         color = mpl.colors.rgb2hex(rgb)
 
+        # The size of the graph nodes (the `width` property) is scaled by mass. To get
+        # better distinction between masses, I put them into broad classes.
         if mass > 10:
             width = mass / 20
         elif mass > 9 and mass <= 10:
@@ -332,6 +410,19 @@ def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
             G.add_edge(halo_idx, nexthaloinfof_idx)
     """
 
+    # When initializing the SimInfo class, we made an assumption about the maximum halo
+    # mass. Check that this was correct. 
+    if max_mass > sim.max_mass:
+        print("")
+        print(f"When initializing the SimInfo class, we assumed that the maximum halo "
+              f"mass is {sim.max_num_parts} times the particle mass ({sim.max_num_parts} "
+              f"* {sim.partmass} = {sim.max_mass:.3f} [log10Msun]).\nThe actual maximum mass was "
+              f"{max_mass:.3f} [log10Msun]. To get nice scaling of colours, we recommend increasing the "
+              f"value of `max_num_parts` in the `SimInfo` class `__init__` method.\nThe "
+              f"maximum halo mass for this tree corresponds to "
+              f"{pow(10, max_mass - sim.partmass):.0f} particles")
+        print("")
+
     # The networkx graph has been constructed. We now want to turn it into a pygraphvis
     # graph and align all the halos by snapshot.
     graphvis_G = convert_networkx_to_graphvis(G, halo_snapshot)
@@ -343,25 +434,28 @@ def plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out):
 
 if __name__ == '__main__':
 
+    # Get some information about the simulation we're using.
+    sim = SimInfo("Millennium")
+
     # When we plot the halo nodes, we want to color them based onstellar mass. Hence
     # let's first generate a map that will be used to do ``mass -> rgb value``. 
     cmap = "rainforest_r"  # Going to use Ellert's Rainforest colormap. Requires e13tools.
     cmap_dir = "./colormaps"  # Colormap is located in `./colormaps` directory.
-    min_val = 7  # log10(Msun).
-    max_val = 12  # log10(Msun).
+    min_val = sim.min_mass  # log10(Msun).
+    max_val = sim.max_mass  # log10(Msun).
     cmap_map = get_cmap_map(cmap, min_val, max_val, cmap_dir="./colormaps")
 
     # To make things easier and to make a better plot, let's read the first tree that has
     # exactly 1 FoF halo.
-    tree_path = "./subgroup_trees_050.dat"
-    tree_num = None 
-    num_root_fofs = 1 
-    root_snap_num = 98
-    num_halos = 500
+    tree_path = "./trees_063.0"
+    tree_num = 0 
+    num_root_fofs = None
+    root_snap_num = sim.root_snapnum
+    num_halos = 0
     tree = read_tree(tree_path, tree_num=tree_num, num_root_fofs=num_root_fofs,
                      root_snap_num=root_snap_num, num_halos=num_halos)
 
     # Time to plot the tree.
-    snapshots_to_plot = np.arange(87, root_snap_num+1)
-    fname_out = "plots/simple_merger_tree.png"
-    plot_merger_tree(tree, snapshots_to_plot, cmap_map, fname_out) 
+    snapshots_to_plot = np.arange(40, root_snap_num+1)
+    fname_out = "mill/simple_merger_tree.png"
+    plot_merger_tree(sim, tree, snapshots_to_plot, cmap_map, fname_out) 
