@@ -40,7 +40,7 @@ def get_LHalo_datastruct():
         ('Spin',                (np.float32, 3)),
         ('MostBoundID',         np.int64),
         ('SnapNum',             np.int32),
-        ('Filenr',              np.int32),
+        ('FileNr',              np.int32),
         ('SubHaloIndex',        np.int32),
         ('SubHalfMass',         np.float32)
                          ]
@@ -132,25 +132,32 @@ def convert_binary_to_hdf5(args):
               .format(args["fname_in"], NTrees, NHalos))
 
         # Write the header information to the HDF5 file.
+        """
         hdf5_file.create_group("Header")
         hdf5_file["Header"].attrs.create("Ntrees", NTrees, dtype=np.int32)
         hdf5_file["Header"].attrs.create("totNHalos", NHalos, dtype=np.int32)
         hdf5_file["Header"].attrs.create("TreeNHalos", NHalosPerTree,
                                          dtype=np.int32)
-
+        """
         # Now loop over each tree and write the information to the HDF5 file.
         for tree_idx in tqdm(range(NTrees)):
             binary_tree = np.fromfile(binary_file, LHalo_Struct,
                                       NHalosPerTree[tree_idx])
 
+            for halo_idx in range(NHalosPerTree[tree_idx]):
+                filenr = binary_tree["FileNr"][halo_idx]
+                if filenr != 0:
+                    print("Halo {0} FileNr {1}".format(halo_idx, filenr))
+
+            """
             tree_name = "tree_{0:03d}".format(tree_idx)
             hdf5_file.create_group(tree_name)
 
             for subgroup_name in LHalo_Struct.names:
                 hdf5_file[tree_name][subgroup_name] = binary_tree[subgroup_name]
+            """
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     args = parse_inputs()
     convert_binary_to_hdf5(args)

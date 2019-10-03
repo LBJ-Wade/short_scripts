@@ -12,8 +12,18 @@ from bokeh.models import ColumnDataSource, GMapOptions
 from bokeh.plotting import gmap
 from bokeh.plotting import figure, output_file, show, ColumnDataSource
 from bokeh.models import HoverTool, TapTool
+from bokeh.layouts import row, column, gridplot
 
-def parse_inputs():
+import locale 
+locale.setlocale(locale.LC_ALL, '') 
+
+# My airline scraping
+import scrape_airfares as scr
+
+# USD to AUD.
+exchange_rate = 1.31
+
+def parse_input():
     """
     Parses the command line input arguments.
 
@@ -32,12 +42,26 @@ def parse_inputs():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-f", "--fname_in", dest="fname_in",
-                        help="Filename for the HDF5 data file containing "
-                        "the cities, the institutes at each city and the "
-                        "groups at each institute. " 
-                        "Default: './data/astro3d_data.hdf5'",
-                        default="./data/astro3d_data.hdf5", type=str)
+    # Taken from
+    # https://stackoverflow.com/questions/24180527/argparse-required-arguments-listed-under-optional-arguments
+    # Normally `argparse` lists all arguments as 'optional'.  However some of
+    # my arguments are required so this hack makes `parser.print_help()`
+    # properly show that they are.
+
+    parser._action_groups.pop()
+    required = parser.add_argument_group('required arguments')
+    optional = parser.add_argument_group('optional arguments')
+
+    optional.add_argument("-d", "--date", dest="date",
+                          help="Date for the meeting. 'DD/MM/YYYY'",
+                          type=str)
+
+    optional.add_argument("-f", "--fname_in", dest="fname_in",
+                          help="Filename for the HDF5 data file containing "
+                          "the cities, the institutes at each city and the "
+                          "groups at each institute. " 
+                          "Default: './data/astro3d_data.hdf5'",
+                          default="./data/astro3d_data.hdf5", type=str)
 
     args = parser.parse_args()
     args = vars(args)
@@ -67,7 +91,8 @@ def set_globalplot_properties():
     plt.rc('legend', numpoints=1, fontsize='x-large')
     plt.rc('text', usetex=True)
     #colors = ['r', 'b', 'g', 'c']
-    colors = ['#7b3294','#a4225f', '#a6dba0', '#d7191c','#d01c8b','#a6611a']
+    colors = ['#7b3294','#a4225f', '#a6dba0', '#d7191c']
+            #,'#d01c8b','#a6611a']
 
 
 def get_Gmap_options():
@@ -124,14 +149,62 @@ def get_google_key(key_dir="."):
     return key
 
 
-def plot_cities(p, args):
+def determine_fares(city, city_dest, date):
+
+    airfares = scr.scrape_airfares(city, city_dest, date)
+    
+    num_flights = len(airfares)
+    prices = []
+
+    for trip_num in range(0, num_flights):
+        if airfares[trip_num]["stops"] != "Nonstop":
+            continue
+
+        prices.append(float(airfares[trip_num]['ticket price'])*exchange_rate)
+
+    return prices
+
+
+def deal_with_airfares(args, data_file, cities):
+
+    mean_cost = {}
+    airfare_cost = {}
+
+    for city in cities:
+        mean_cost[city] = 0.0
+
+    for city in cities:
+        airfare_cost[city] = {}
+
+        # We need to get the airfares from every combination of cities.
+        for count, city_dest in enumerate(cities):
+            if city_dest == city:  # Don't travel to itself!
+                continue
+
+            prices = determine_fares(city, city_dest, args["date"])
+            mean_cost[city_dest] += np.mean(prices)* \
+                                   data_file["Cities"][city].attrs["NumPeople"]
+            airfare_cost[city][city_dest] = prices 
+
+            print("{0} to {1} costs {2}".format(city, city_dest, prices))
+
+    print("The cost to hold a meeting in each city is:")
+    for city in mean_cost.keys():
+        print("{0}: {1}".format(city, 
+                                locale.currency(mean_cost[city]*exchange_rate,
+                                                grouping=True)))
+
+    return airfare_cost
+
+
+def plot_cities(GMap, airfare_plots, args):
     """
     Plots the location of the cities the institutes belong to. 
 
     Parameters
     ----------
 
-    p: Bokeh GMap (Google Map) Axis. 
+    GMap: Bokeh GMap (Google Map) Axis. 
         Map that we're plotting the data on top of.
 
     args: Dictionary.  Required.
@@ -166,7 +239,9 @@ def plot_cities(p, args):
     # E.g., data_file["Cities"]["Melbourne"]["Swinburne University of
     # Technology"]["CIs"].value would give the number of CIs at Swinburne.
 
-    for city in data_file["Cities"].keys():
+    cities = data_file["Cities"].keys()
+
+    for city in cities:
         for institute in data_file["Cities"][city].keys():
 
             inst_name.append(institute)
@@ -183,6 +258,22 @@ def plot_cities(p, args):
                 data_file["Cities"][city][institute][group].value 
 
             count += 1 
+
+    # If a date is passed at Runtime we want to determine the airfares at
+    # the date.
+
+    if len(cities) > 1 and args["date"]:
+        airfare_cost = deal_with_airfares(args, data_file, cities)
+
+        airfares = [[] for x in range(len(cities))]
+        for count, city in enumerate(cities):
+            for dest_city in cities:
+                if dest_city == city:
+                    airfares[count].append([])
+                else:      
+                    airfares[count].append(airfare_cost[city][dest_city])
+            
+    
 
     # Now that we've got the number of people within each institute, we need to
     # construct an array that holds the number of people within each group.
@@ -210,13 +301,34 @@ def plot_cities(p, args):
     for count, group in enumerate(group_names): 
         data[group] = total_NumPeople_group[count]
 
+    if args["date"]:
+        for city_count, city in enumerate(cities):
+            airfares_to_show = []
+            for dest_count, dest_city in enumerate(cities):
+                if dest_city == city:
+                    airfares_to_show.append(0.0)
+                    continue
+                airfares_this_city = airfares[city_count][dest_count]
+                airfares_to_show.append(np.median(airfares_this_city))
+
+                #plot3 = airfare_plots[dest_city].circle(range(len(airfares_this_city)),
+                #                                        airfares_this_city, 
+                #                                        color=colors[city_count]) 
+            airfare_plots[city].vbar(x=list(cities), 
+                                     top=airfares_to_show,
+                                     width=0.5) 
+
+            airfare_plots[city].yaxis.axis_label = "Median Price"
+
+            #data[city] = airfares_to_show 
+
     # Then turn it into a Bokeh friendly format.
     source = ColumnDataSource(data=data)
 
     # Plot a Cross at each of the capital cities.
     # Note: For places such as Melbourne that have multiple institutes, we
     # actually plot two Crosses but they're at the exact same lat/long.
-    plot1 = p.cross('x', 'y', size=20, source=source, angle=45, line_width=5)
+    plot1 = GMap.cross('x', 'y', size=20, source=source, angle=45, line_width=5)
 
     # Then generate the tooltips that will be shown when the user hovers over a
     # point.
@@ -234,19 +346,19 @@ def plot_cities(p, args):
     # Then add them to the plot.  We explicitly only render the tooltips for
     # these crosses as we will have other objects on the same map but we don't
     # want the tooltips to show for them.
-    p.add_tools(HoverTool(renderers=[plot1], tooltips=tooltips))
+    GMap.add_tools(HoverTool(renderers=[plot1], tooltips=tooltips))
  
     data_file.close()
 
 
-def plot_group_means(p, args):
+def plot_group_means(GMap, args):
     """
     Plots the mean location of the groups. 
 
     Parameters
     ----------
 
-    p: Bokeh GMap (Google Map) Axis. 
+    GMap: Bokeh GMap (Google Map) Axis. 
         Map that we're plotting the data on top of.
 
     args: Dictionary.  Required.
@@ -313,15 +425,29 @@ def plot_group_means(p, args):
                               x=lon_values,
                               y=lat_values,
                               group_name=group_names,
-                              people=people,))
+                              people=people,
+                              fill_colors=colors,))
 
-    plot2 = p.circle('x', 'y', size=15, source=source) 
-    p.add_tools(HoverTool(renderers=[plot2], tooltips=[
+    plot2 = GMap.circle('x', 'y', size=15, source=source,
+                        fill_color='fill_colors')
+    GMap.add_tools(HoverTool(renderers=[plot2], tooltips=[
                       ("Group", "@group_name"),
                       ("Number People", "@people")]))
    
 
     data_file.close()
+
+
+def determine_cities(args):
+
+
+    city_names = []
+    with h5py.File(args["fname_in"], "r") as data_file:
+   
+        cities = data_file["Cities"].keys()
+        for city in cities:
+            city_names.append(city)
+    return city_names 
 
 
 def plot_data(args): 
@@ -352,21 +478,42 @@ def plot_data(args):
     API_key = get_google_key()
 
     # Now let's plot Australia!
-    p = gmap(API_key, map_options,
+    GMap = gmap(API_key, map_options,
              title="Australia")
-  
+        
+    if args["date"]:
+        city_names = determine_cities(args)
+        airfare_plots = {}
+
+        for city in city_names: 
+            airfare_plots[city] = figure(x_range=city_names, plot_width=400, 
+                                         plot_height=400, tools="", 
+                                         toolbar_location=None,
+                                         title=city)
+    else:
+        airfare_plots = None
+
     # Plot the cities each institution belongs to.
-    plot_cities(p, args)
+    plot_cities(GMap, airfare_plots, args)
 
     # Then for each group, plot the mean location of the group.
-    plot_group_means(p, args)
+    plot_group_means(GMap, args)
 
-    show(p) 
+    if args["date"]:      
+        grid = []
+        for city in city_names: 
+            grid.append(airfare_plots[city])
 
+        my_grid = gridplot(grid, ncols=2, plot_width=250, plot_height=250)
+
+        show(row(GMap, my_grid))
+    else:
+        print(GMap)
+        show(GMap)
 
 if __name__ == '__main__':
 
-    args = parse_inputs()
+    args = parse_input()
 
     set_globalplot_properties()
 

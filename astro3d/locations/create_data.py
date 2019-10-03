@@ -73,6 +73,7 @@ if __name__ == '__main__':
     inst_count = 0
     with h5py.File(args["fname"], "w") as f:
         for city in institutes.keys():
+            numpeople_city = 0
             for institution in institutes[city]:
                 NumPeople = 0
                 for group in groups:
@@ -85,6 +86,7 @@ if __name__ == '__main__':
 
                     print(numbers[group][inst_count])
                     NumPeople += numbers[group][inst_count]
+                    numpeople_city += numbers[group][inst_count]
 
                 grp_name = "Cities/{0}/{1}".format(city, institution)
                 f[grp_name].attrs.create("Coords", inst_coord[institution])
@@ -93,4 +95,5 @@ if __name__ == '__main__':
                 inst_count += 1
             grp_name = "Cities/{0}".format(city)
             f[grp_name].attrs.create("Coords", cities_coord[city])
+            f[grp_name].attrs.create("NumPeople", numpeople_city) 
 
