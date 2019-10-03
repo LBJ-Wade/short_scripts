@@ -49,6 +49,10 @@ class SimInfo(object):
             self.hubble_h = 0.6871
             self.partmass = 0.00078436
             self.root_snapnum = 98
+        elif self.name == "Genesis":
+            self.hubble_h = 0.6751
+            self.partmass = 0.107
+            self.root_snapnum = 131 
 
         # Convert particle mass to log10(Msun).
         self.partmass = np.log10(self.partmass * 1.0e10 / self.hubble_h)
@@ -300,7 +304,7 @@ def convert_networkx_to_graphvis(networkx_graph, halos_per_snapshot):
     return A
 
 
-def plot_merger_tree(sim, tree, snapshots_to_plot, cmap_map, fname_out):
+def plot_merger_tree(sim, tree, snapshots_to_plot, fname_out, cmap_map=None):
     """
     Plots a graph for a given LHaloTree ``tree`` at the specified snapshots.
 
@@ -316,11 +320,11 @@ def plot_merger_tree(sim, tree, snapshots_to_plot, cmap_map, fname_out):
     snapshots_to_plot: list or array-like of ints
         Only halos at these snapshots will be plotted.
 
-    cmap_map: ``matplotlib.cm.ScalarMappable``
-        Colormap used to color the graph nodes based on halo mass.
-
     fname_out: string
         Name of the output file.
+
+    cmap_map: ``matplotlib.cm.ScalarMappable``, optional
+        If specified, uses the colormap to color the graph nodes based on halo mass.
 
     Generates
     ---------
@@ -363,21 +367,32 @@ def plot_merger_tree(sim, tree, snapshots_to_plot, cmap_map, fname_out):
         if mass < min_mass:
             min_mass = mass
 
-        # Map the mass to the RGB value of the defined colormap.
-        # `rgba` returns (R, G, B, A) so take first 3 indices.
-        rgb = cmap_map.to_rgba(mass)[:3]
+        if cmap_map:
+            # Map the mass to the RGB value of the defined colormap.
+            # `rgba` returns (R, G, B, A) so take first 3 indices.
+            rgb = cmap_map.to_rgba(mass)[:3]
 
-        # Turn into hex '#XXXXXX' for pygraphvis.
-        color = mpl.colors.rgb2hex(rgb)
+            # Turn into hex '#XXXXXX' for pygraphvis.
+            color = mpl.colors.rgb2hex(rgb)
+        else:
+            # Colour node whether the halo is the main FoF halo.
+            if tree["FirstHaloInFOFgroup"][halo_idx] == halo_idx:
+                color = "#FF0000"  # Red
+            else:
+                color = "#0000ff"  # Blue
 
         # The size of the graph nodes (the `width` property) is scaled by mass. To get
         # better distinction between masses, I put them into broad classes.
-        if mass > 10:
+        if mass > 11:
+            width = mass / 15
+        elif mass > 11 and mass <= 12:
             width = mass / 20
-        elif mass > 9 and mass <= 10:
+        elif mass > 10 and mass <= 11:
             width = mass / 25
-        else:
+        elif mass > 9 and mass <= 10:
             width = mass / 30
+        else:
+            width = mass / 35
 
         # When we add the node, we don't want silly little labels. 
         G.add_node(halo_idx, snapnum=snapnum, color=color, width=width,
@@ -435,7 +450,7 @@ def plot_merger_tree(sim, tree, snapshots_to_plot, cmap_map, fname_out):
 if __name__ == '__main__':
 
     # Get some information about the simulation we're using.
-    sim = SimInfo("Millennium")
+    sim = SimInfo("Millennium", max_num_parts=2e6)
 
     # When we plot the halo nodes, we want to color them based onstellar mass. Hence
     # let's first generate a map that will be used to do ``mass -> rgb value``. 
@@ -447,15 +462,16 @@ if __name__ == '__main__':
 
     # To make things easier and to make a better plot, let's read the first tree that has
     # exactly 1 FoF halo.
+    #tree_path = "./subvolume_converted.43"
     tree_path = "./trees_063.0"
     tree_num = 0 
-    num_root_fofs = None
+    num_root_fofs = None 
     root_snap_num = sim.root_snapnum
     num_halos = 0
     tree = read_tree(tree_path, tree_num=tree_num, num_root_fofs=num_root_fofs,
                      root_snap_num=root_snap_num, num_halos=num_halos)
 
     # Time to plot the tree.
-    snapshots_to_plot = np.arange(40, root_snap_num+1)
-    fname_out = "mill/simple_merger_tree.png"
-    plot_merger_tree(sim, tree, snapshots_to_plot, cmap_map, fname_out) 
+    snapshots_to_plot = np.arange(0, root_snap_num+1)
+    fname_out = "mill/complex_merger_tree.png"
+    plot_merger_tree(sim, tree, snapshots_to_plot, fname_out, cmap_map=None) 
