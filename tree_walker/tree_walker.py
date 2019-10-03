@@ -2,7 +2,6 @@
 from __future__ import print_function
 import numpy as np
 import networkx as nx
-import pygraphviz as pgv
 from matplotlib import pyplot as plt
 
 
@@ -71,6 +70,10 @@ def read_tree(tree_path, tree_num=None, num_root_fofs=None, root_snap_num=None):
         NHalos = np.fromfile(f_in, np.dtype(np.int32), 1)[0]
         NHalosPerTree = np.fromfile(f_in, np.dtype((np.int32, NTrees)), 1)[0]
 
+        max_halos_tree = np.argmax(NHalosPerTree)
+        print(f"Max halos is {NHalosPerTree[max_halos_tree]} for tree {max_halos_tree}")
+        return
+
         if tree_num:
             if tree_num > NTrees:
                 print(f"The number of trees in file {tree_path} is {NTrees}. You requested to "
@@ -84,10 +87,12 @@ def read_tree(tree_path, tree_num=None, num_root_fofs=None, root_snap_num=None):
             tree = np.fromfile(f_in, LHalo_struct, NHalosPerTree[tree_idx])
 
             if num_root_fofs is not None:
-                if len(np.where(tree["SnapNum"][:] == root_snap_num)[0]) == num_root_fofs:
+                if len(np.where(tree["SnapNum"][:] == root_snap_num)[0]) == num_root_fofs \
+                    and len(tree) > 1000:
                     print(f"Tree {tree_idx} has {num_root_fofs} root FoFs and a total of "
                           f"{len(tree)} halos. Returning it.")
-                    return tree
+                    print(f"{tree_path}")
+                    #return tree
 
             if tree_num:
                 if tree_idx == tree_num:
@@ -95,9 +100,9 @@ def read_tree(tree_path, tree_num=None, num_root_fofs=None, root_snap_num=None):
                     return tree
 
     # If we reach here, we didn't hit the desired tree number or number of root FoFs somehow.
-    print(f"After searching through all trees in {tree_path}, we could not find tree "
-          f"number {tree_num} or a tree with {num_root_fofs} root FoFs.")
-    raise ValueError
+    #print(f"After searching through all trees in {tree_path}, we could not find tree "
+    #      f"number {tree_num} or a tree with {num_root_fofs} root FoFs.")
+    #raise ValueError
 
     return None
 
@@ -146,11 +151,16 @@ if __name__ == '__main__':
 
     # To make things easier and to make a better plot, let's read the first tree that has
     # exactly 1 FoF halo.
+    trees = np.arange(0, 64)
     tree_path = "/fred/oz004/jseiler/kali/shifted_trees/subgroup_trees_000.dat"
     num_root_fofs = 1
     root_snap_num = 98
-    tree = read_tree(tree_path, num_root_fofs=num_root_fofs, root_snap_num=root_snap_num)
-
+    #tree = read_tree(tree_path, num_root_fofs=num_root_fofs, root_snap_num=root_snap_num)
+    for suffix in trees:
+        print(f"{suffix}")
+        path = f"/fred/oz004/jseiler/kali/shifted_trees/subgroup_trees_{suffix:03}.dat"
+        read_tree(path, num_root_fofs=num_root_fofs, root_snap_num=root_snap_num)
+    exit()
     # Initialize the graph.
     G = nx.Graph()
 
